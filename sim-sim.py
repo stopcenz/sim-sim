@@ -328,7 +328,6 @@ class MainHandler(webapp2.RequestHandler):
     content = content.replace('%%token%%', token)
     content = content.replace('%%year%%', str(datetime.datetime.now().year))
     self.response.write(content)
-    self.response.write(str(self.request.cookies))
 
 
   def get_new_token(self):
