@@ -1,0 +1,22 @@
+# https://cloud.google.com/appengine/docs/python/config/appref
+runtime: python27
+api_version: 1
+threadsafe: yes
+
+instance_class: F1
+automatic_scaling:
+  min_idle_instances: 0
+  max_idle_instances: 3
+  min_pending_latency: 15s  
+  max_pending_latency: 15s
+  max_concurrent_requests: 20
+
+handlers:
+- url: /.*
+  script: sim-sim.app
+  secure: always
+
+libraries:
+- name: webapp2
+  version: latest
+  

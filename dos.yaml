@@ -1,0 +1,14 @@
+# blacklist IP addresses or subnets
+# https://cloud.google.com/appengine/docs/python/config/dosref
+blacklist:
+- subnet: 194.165.22.0/23
+  description: rkn
+
+- subnet: 62.105.143.40/29
+  description: groupIB
+  
+- subnet: 91.106.207.133
+  description: groupIB bot
+
+- subnet: 93.170.146.51
+  description: troll from pervomais'k-na-buge
