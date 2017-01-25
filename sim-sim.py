@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*- 
 
+# Sim-Sim 
+# Version 3
 # GAE-based proxy server
 
 # Author: stopcenz - stopcenz@gmail.com
@@ -7,15 +9,16 @@
 
 """
 Автор передает этот код в общественное достояние путём отказа от всех своих прав 
-на произведение по всему миру в рамках законодательства об авторских правах, включая 
-все связанные и смежные права, которые он имеет по отношению к данной программе, 
-в той степени, в которой это допускается законом.
+на эту компьютерую программу по всему миру, включая все связанные и смежные права, 
+которые он имеет по отношению к данной программе, в той степени, в которой 
+это допускается законом.
 
 Вы можете копировать, изменять, распространять этот код, даже в коммерческих целях,
 не спрашивая разрешения. 
 
-Автор не даёт никаких гарантий относительно программы и не несет ответственности за все виды 
-использования, в максимально возможной степени, допустимой применяемым правом.
+Автор не даёт никаких гарантий относительно программы и не несет ответственности 
+за все виды использования, в максимально возможной степени, допустимой 
+применяемым правом.
 """
 
 ##########################################################################################
@@ -58,11 +61,10 @@ BLOCKED_TOKENS = []
 
 # Параметры автоматической защиты от спама.
 
-SPAM_DETECTOR_INTERVAL    = 600 # анализируемый период времени в секундах
-SPAM_DETECTOR_TOTAL_COUNT = 600 # максимально допустимое количество запросов для одного ip-адреса
-SPAM_DETECTOR_POST_COUNT  = 100 # максимально допустимое запросов POST для одного ip-адреса
+SPAM_DETECTOR_INTERVAL = 600  # анализируемый период времени в секундах
+SPAM_DETECTOR_COUNT    = 1200 # максимально допустимое количество запросов для одного ip
 
-# Перечисленные сайты всегда открываются напрямую минуя прокси
+# Перечисленные сайты открываются напрямую минуя прокси
 
 ECXCLUDED_HOSTS = [
   "appspot.com",
@@ -71,16 +73,21 @@ ECXCLUDED_HOSTS = [
   "youtu.be",
   "ytimg.com",
   "vimeo.com",
-  "vimeocdn.com"]
+  "vimeocdn.com",
+  "onion",
+  "lib",
+  "i2p",
+  "local"]
 
 # Примеры заблокированных доменов для показа на главной
 
-SAMPLE_HOSTS = ["kinozal.tv", "flibusta.is", "ej.ru"]
+SAMPLE_HOSTS = ["kinozal.tv", "lib.rus.ec", "ej.ru"]
 
 ##########################################################################################
 
 NUMERALS = '0123456789abcdefghijklmnopqrstuvwxyz'
 
+from detect_spam import *
 from home_page import *
 from site_patches import *
 
@@ -109,7 +116,9 @@ class MainHandler(webapp2.RequestHandler):
       self.any()
       return
     
-    if not ADMINS_ONLY and self.detect_spam():
+    if not ADMINS_ONLY and \
+       detect_spam(self.request.remote_addr, SPAM_DETECTOR_INTERVAL, SPAM_DETECTOR_COUNT):
+      logging.warning('Spam')
       return
     if ADMINS_ONLY and not users.IsCurrentUserAdmin():
       return
@@ -139,11 +148,14 @@ class MainHandler(webapp2.RequestHandler):
 
 
   def any(self):
-    if not ADMINS_ONLY and self.detect_spam():
+    if not ADMINS_ONLY and \
+       detect_spam(self.request.remote_addr, SPAM_DETECTOR_INTERVAL, SPAM_DETECTOR_COUNT):
       # If you think adding captcha here is a good idea
+      self.response.status_int = 403
+      logging.warning('Spam')
       return
     
-    if '/robots.txt' == self.request.path_qs:
+    if '/robots.txt' == self.request.path:
       self.show_robots_txt()
       return
     
@@ -174,14 +186,14 @@ class MainHandler(webapp2.RequestHandler):
         method           = self.request.method,
         headers          = self.get_modified_request_headers(scheme, host),
         allow_truncated  = False,
-        follow_redirects = False)
-      
+        follow_redirects = False,
+        deadline         = 60)
     except Exception as e:
       self.response.status_int = 504
       self.response.write('<h1>Error</h1><p>' + str(e))
       logging.error(str(e))
       return
-    
+      
     content = result.content
     self.response.headers = {}
     
@@ -224,6 +236,8 @@ class MainHandler(webapp2.RequestHandler):
           content = self.encode_url(content, token, scheme)
         elif content_type[1] in ['javascript']:
           content = patch_js(scheme, host, self.request.path, content)
+        elif content_type[1] in ['bittorrent', 'x-bittorrent']:
+          content = patch_torrent(scheme, host, self.request.path, content, self.root_host)
     return content
 
 
@@ -254,7 +268,7 @@ class MainHandler(webapp2.RequestHandler):
       if matchobj.group(1):
         return scheme + '://' + host
       return host
-    regexp = r'(https://|)' + re.escape(self.request.host)
+    regexp = r'(https:\/\/|)' + re.escape(self.request.host)
     result = {}
     for name, value in self.request.headers.iteritems():
       if not name.lower().startswith('x-appengine-'):
@@ -328,8 +342,8 @@ class MainHandler(webapp2.RequestHandler):
     content = content.replace('%%token%%', token)
     content = content.replace('%%year%%', str(datetime.datetime.now().year))
     self.response.write(content)
-
-
+    
+    
   def get_new_token(self):
     while True:
       token = ''.join(random.choice(NUMERALS) for _ in range(TOKEN_LENGTH))
@@ -371,22 +385,6 @@ class MainHandler(webapp2.RequestHandler):
     memcache.set(token, value, 60 * 60, namespace = 'tokens')
     return True
 
-
-# https://cloud.google.com/appengine/docs/python/refdocs/google.appengine.api.memcache
-  def detect_spam(self):
-    if not memcache.get(self.request.remote_addr, namespace = 'spam') is None:
-      logging.warning('Spam')
-      return True
-    key = self.request.remote_addr + '_' + str(long(time.time()) // SPAM_DETECTOR_INTERVAL % 9)
-    value = memcache.get(key, namespace = 'spam') or [0, 0]
-    value[0] += 1
-    if self.request.method in ['POST', 'PUT', 'PATCH']:
-      value[1] += 1
-    if value[0] < SPAM_DETECTOR_TOTAL_COUNT and value[1] < SPAM_DETECTOR_POST_COUNT:
-      memcache.set(key, value, SPAM_DETECTOR_INTERVAL, namespace = 'spam')
-    else:
-      memcache.set(self.request.remote_addr, '', 24 * 60 * 60, namespace = 'spam')
-    return False
 
 app = webapp2.WSGIApplication([
     ('/.*', MainHandler)

@@ -1,5 +1,7 @@
 # site-specific corrections
 
+import re
+
 def patch_host(scheme, host, path):
   if host in ['dl.kinozal.tv', 'dl.kinozal.me']:
     # cookie visibility correction
@@ -33,6 +35,17 @@ def patch_js(scheme, host, path, content):
       srch = ';this.action=(a?"https:":"http:")+"//"'
       repl = ';this.action="https://"'
       content = content.replace(srch, repl, 1)
+  return content
+
+
+def patch_torrent(scheme, host, path, content, root_host):
+  if host == 'dl.kinozal.tv':
+    poxy_url = 'https://' + root_host + '/'
+    def dashrepl(matchobj):
+      length = int(matchobj.group(1)) + len(poxy_url)
+      return str(length) + ':' + poxy_url + matchobj.group(2)
+    regexp = r'([0-9]{2,3}):(http:\/\/tr[0-5]\.torrent4me\.com\/ann)'
+    content = re.sub(regexp, dashrepl, content, count = 2)
   return content
 
 
