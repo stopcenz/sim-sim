@@ -7,6 +7,12 @@ blacklist:
 - subnet: 62.105.143.40/29
   description: groupIB
   
+- subnet: 5.200.56.248
+  description: groupIB
+  
+- subnet: 80.93.190.178
+  description: groupIB
+  
 - subnet: 91.106.207.133
   description: groupIB bot
 

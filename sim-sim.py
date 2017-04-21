@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*- 
 
 # Sim-Sim 
-# Version 3
+# Version 5
 # GAE-based proxy server
 
 # Author: stopcenz - stopcenz@gmail.com
@@ -44,9 +44,16 @@ MAX_LENGHT_HTML = 2000000
 
 # Удаляемые из ответа сервера заголовки. Указываются в нижнем регистре.
 
-SKIPPED_HEADERS = ["content-security-policy", "x-content-security-policy", "x-webkit-csp",
-  "public-key-pins", "public-key-pins-report-only"]
-
+SKIPPED_HEADERS = [
+  "content-security-policy", 
+  "x-content-security-policy", 
+  "content-security-policy-report-only", 
+  "x-content-security-policy-report-only",
+  "x-webkit-csp",
+  "x-webkit-csp-report-only",
+  "public-key-pins", 
+  "public-key-pins-report-only"]
+  
 # Длина токена (часть доменного имени, указанной длины, перед символами "-dot-").
 
 TOKEN_LENGTH = 5
@@ -74,14 +81,24 @@ ECXCLUDED_HOSTS = [
   "ytimg.com",
   "vimeo.com",
   "vimeocdn.com",
+  "googleapis.com",
+  "bootstrapcdn.com",
   "onion",
   "lib",
   "i2p",
   "local"]
 
+# Если видео потребляет много трафика можно отключить его передачу (1)
+
+DISABLE_VIDEO_CONTENT = 0
+
 # Примеры заблокированных доменов для показа на главной
 
 SAMPLE_HOSTS = ["kinozal.tv", "lib.rus.ec", "ej.ru"]
+
+# Время (в секундах) ожидания ответа удаленного сервера
+
+URLFETCH_DEADLINE = 50
 
 ##########################################################################################
 
@@ -164,18 +181,28 @@ class MainHandler(webapp2.RequestHandler):
       self.show_home_page()
       return
       
-    (scheme, host, token) = self.unpack_host()
+    (scheme, host, port, token) = self.unpack_host()
     if scheme is None:
       self.redirect(str('https://' + self.root_host))
       return
     (scheme, host, path_qs) = patch_host_back(scheme, host, self.request.path_qs)
-    url = scheme + '://' + host + path_qs
+    url = scheme + '://' + host
+    if port:
+      if scheme == 'https':
+        if port != '443':
+          url += ':' + port
+      elif port != '80':
+        url += ':' + port
+    
+    url += path_qs
+    logging.debug(url)
+    
     if token in BLOCKED_TOKENS:
       self.redirect(str('https://' + self.root_host))
       logging.info('Blocked token')
       return
     if not self.is_stored_token(token):
-      self.redirect(str('https://' + self.root_host + '/' + url))
+      self.redirect(str('https://' + self.root_host + '/' + url), code = 307)
       return
     
 # https://cloud.google.com/appengine/docs/python/refdocs/modules/google/appengine/api/urlfetch
@@ -184,10 +211,10 @@ class MainHandler(webapp2.RequestHandler):
         url              = url,
         payload          = self.request.body,
         method           = self.request.method,
-        headers          = self.get_modified_request_headers(scheme, host),
+        headers          = self.get_modified_request_headers(scheme, host, port),
         allow_truncated  = False,
         follow_redirects = False,
-        deadline         = 60)
+        deadline         = URLFETCH_DEADLINE)
     except Exception as e:
       self.response.status_int = 504
       self.response.write('<h1>Error</h1><p>' + str(e))
@@ -204,7 +231,7 @@ class MainHandler(webapp2.RequestHandler):
       if name_l in SKIPPED_HEADERS:
         continue
       if 'set-cookie' == name_l:
-        match = re.match(r'(^.+;\s*Domain=\.?)([^ ;]+)(.+$)', value, flags = re.IGNORECASE)
+        match = re.match(r'(^.+;\s*Domain=\.?)([^ ;]+)(.*$)', value, flags = re.IGNORECASE)
         if match:
           if match.group(2).lower() != host:
             continue
@@ -213,6 +240,9 @@ class MainHandler(webapp2.RequestHandler):
       if 'location' == name_l:
         value = self.encode_url(value, token, scheme)
       if 'content-type' == name_l:
+        if DISABLE_VIDEO_CONTENT and value.lower().startswith('video/'):
+          self.response.status_int = 404
+          return
         content = self.modify_content(content, value, scheme, host, token)
       self.response.headers.add_header(name, value)
     
@@ -222,7 +252,7 @@ class MainHandler(webapp2.RequestHandler):
       self.response.status_int = 504
     
     self.response.write(content)
-    
+
 
   def modify_content(self, content, content_type_value, scheme, host, token):
     if MAX_LENGHT_HTML < 1 or len(content) <= MAX_LENGHT_HTML:
@@ -230,10 +260,10 @@ class MainHandler(webapp2.RequestHandler):
       if len(content_type) > 1 and content_type[0] in ['text', 'application']:
         if content_type[1] in ['html', 'xml', 'xhtml+xml', 'plain']:
           content = patch_html(scheme, host, self.request.path, content)
-          content = self.encode_url(content, token, scheme)
+          content = self.encode_url(content, token, scheme, mode = 'html')
         elif content_type[1] in ['css']:
           content = patch_css(scheme, host, self.request.path, content)
-          content = self.encode_url(content, token, scheme)
+          content = self.encode_url(content, token, scheme, mode = 'css')
         elif content_type[1] in ['javascript']:
           content = patch_js(scheme, host, self.request.path, content)
         elif content_type[1] in ['bittorrent', 'x-bittorrent']:
@@ -241,62 +271,83 @@ class MainHandler(webapp2.RequestHandler):
     return content
 
 
-# sub-domain-site-com-93token-dot-app-id.appspot.com -> ('http', 'sub-domain.site.com', 'token')
+# site-com-3token-dot-app-id.appspot.com -> ('http', 'site.com', '', 'token')
+# sub-domain-site-com-8080-93token-dot-app-id.appspot.com -> ('http', 'sub-domain.site.com', '8080', 'token')
   def unpack_host(self):
-    regexp = r'^([-a-z0-9]+-[a-z]{2,9})(-{1,2})([a-z0-9]+)([a-z0-9]{' 
+    regexp = r'^([-a-z0-9]+-[a-z]{2,9})(-{1,2})([0-9]{1,5}-|)([a-z0-9]+)([a-z0-9]{' 
     regexp += str(TOKEN_LENGTH) + r'})-dot-'
     match = re.match(regexp, self.request.host)
     if match is None:
-      return (None, None, None)
+      return (None, None, None, None)
+    port = match.group(3)[:-1]
     host_name_list = list(match.group(1))
     pos = -1
-    for num36 in match.group(3):
+    for num36 in match.group(4):
       pos += NUMERALS.index(num36) + 2
       if pos >= len(host_name_list) or host_name_list[pos] != '-':
-        return (None, None, None)
+        return (None, None, None, None)
       host_name_list[pos] = '.'
     if len(match.group(2)) > 1:
       scheme = 'https'
     else:
       scheme = 'http'
-    token = match.group(4)
-    return (scheme, ''.join(host_name_list), token)
+    token = match.group(5)
+    return (scheme, ''.join(host_name_list), port, token)
 
 
-  def get_modified_request_headers(self, scheme, host):
+  def get_modified_request_headers(self, scheme, host, port):
     def dashrepl(matchobj):
       if matchobj.group(1):
+        result = scheme + '://' + host
+        if port:
+          result += ':' + port
         return scheme + '://' + host
       return host
     regexp = r'(https:\/\/|)' + re.escape(self.request.host)
     result = {}
     for name, value in self.request.headers.iteritems():
-      if not name.lower().startswith('x-appengine-'):
+      name_l = name.lower()
+      if not name_l.startswith('x-') and name_l != 'referer':
         result[name] = re.sub(regexp, dashrepl, value, flags = re.IGNORECASE)
     return result
  
  
-  def encode_url(self, text, token, current_scheme = 'http'):
+  def encode_url(self, text, token, current_scheme = 'http', mode = None):
     def dashrepl(matchobj):
-      host = matchobj.group(2).strip('.').lower()
+      host = matchobj.group(4).strip('.').lower()
       if self.is_exluded_host(host) or '-dot-' in host:
         return matchobj.group(0)
-      scheme = matchobj.group(1).lower()
+      scheme = matchobj.group(3).lower()
       if '//' == scheme:
         scheme = current_scheme
-      (scheme, host, path) = patch_host(scheme, host, matchobj.group(3))
+      port = matchobj.group(5)[1:]
+      path = matchobj.group(6)
+      (scheme, host, path) = patch_host(scheme, host, path)
+      
       dot_pos = ''
       for l in map(lambda s: len(s), host.split('.')[:-1]):
         if l < 1 or l > len(NUMERALS):
           return matchobj.group(0)
         dot_pos += NUMERALS[l - 1]
-      result = 'https://' + host.replace('.', '-') + '-' 
+      result = matchobj.group(1) + 'https://' + host.replace('.', '-') + '-' 
+      
       if scheme.startswith('https'):
         result += '-'
+        if port != '' and port != '443':
+          result += port + '-'
+      elif port != '' and port != '80':
+      	result += port + '-'
+      	
       result += dot_pos + token + '-dot-' + self.root_host + path
       return result 
-    regexp = r'(https:\/\/|http:\/\/|(?<=[=\'"\(])\/\/)'
-    regexp += r'([a-z0-9][-a-z0-9\.]*\.[a-z]{2,9})(\/[-_\.~%\/a-z0-9]+|)'
+    
+    if mode == 'css':
+      regexp = r'((url)\s*\(\s*[\'"]?)(https?:|)\/\/'
+    elif mode == 'html':
+      regexp = r'(\<[^\<\>]+\s(src|href|action)=[\'"]?)(https?:|)\/\/'
+    else:
+      regexp = r'(())(https?:)\/\/'
+    regexp += r'([a-z0-9][-a-z0-9\.]*\.[a-z]{2,9})\.?(:[0-9]{1,5}|)(\/[-_\.~%\/a-z0-9]+|)'
     return re.sub(regexp, dashrepl, text, flags = re.IGNORECASE)
 
 
@@ -321,7 +372,8 @@ class MainHandler(webapp2.RequestHandler):
       'Strict-Transport-Security': 'max-age=31536000; preload'}
     if ADMINS_ONLY and not users.IsCurrentUserAdmin():
       if users.get_current_user():
-        self.response.write('Access denied')
+        self.response.status_int = 403
+        self.response.write('<h1>Forbidden</h1>')
       else:
         self.redirect(str(users.create_login_url(self.request.path_qs)))
       return
@@ -387,5 +439,5 @@ class MainHandler(webapp2.RequestHandler):
 
 
 app = webapp2.WSGIApplication([
-    ('/.*', MainHandler)
+  ('/.*', MainHandler)
 ], debug=False)
