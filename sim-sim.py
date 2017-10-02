@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*- 
 
 # Sim-Sim 
-# Version 5
+# Version 6
 # GAE-based proxy server
 
 # Author: stopcenz - stopcenz@gmail.com
@@ -45,7 +45,9 @@ MAX_LENGHT_HTML = 2000000
 # Удаляемые из ответа сервера заголовки. Указываются в нижнем регистре.
 
 SKIPPED_HEADERS = [
+  "content-encoding",
   "content-security-policy", 
+  "transfer-encoding",
   "x-content-security-policy", 
   "content-security-policy-report-only", 
   "x-content-security-policy-report-only",
@@ -76,7 +78,7 @@ SPAM_DETECTOR_COUNT    = 1200 # максимально допустимое ко
 ECXCLUDED_HOSTS = [
   "appspot.com",
   "googlevideo.com",
-  "youtube.com", 
+  "youtube.com",
   "youtu.be",
   "ytimg.com",
   "vimeo.com",
@@ -238,7 +240,7 @@ class MainHandler(webapp2.RequestHandler):
           else:
             value = match.group(1) + self.request.host + match.group(3)
       if 'location' == name_l:
-        value = self.encode_url(value, token, scheme)
+        value = self.encode_url(value, token, scheme, mode = 'header')
       if 'content-type' == name_l:
         if DISABLE_VIDEO_CONTENT and value.lower().startswith('video/'):
           self.response.status_int = 404
@@ -310,7 +312,7 @@ class MainHandler(webapp2.RequestHandler):
       if not name_l.startswith('x-') and name_l != 'referer':
         result[name] = re.sub(regexp, dashrepl, value, flags = re.IGNORECASE)
     return result
- 
+
  
   def encode_url(self, text, token, current_scheme = 'http', mode = None):
     def dashrepl(matchobj):
@@ -345,8 +347,10 @@ class MainHandler(webapp2.RequestHandler):
       regexp = r'((url)\s*\(\s*[\'"]?)(https?:|)\/\/'
     elif mode == 'html':
       regexp = r'(\<[^\<\>]+\s(src|href|action)=[\'"]?)(https?:|)\/\/'
+    elif mode == 'header':
+      regexp = r'((^))(https?:|)\/\/'
     else:
-      regexp = r'(())(https?:)\/\/'
+      regexp = r'(())(https?:|^)\/\/'
     regexp += r'([a-z0-9][-a-z0-9\.]*\.[a-z]{2,9})\.?(:[0-9]{1,5}|)(\/[-_\.~%\/a-z0-9]+|)'
     return re.sub(regexp, dashrepl, text, flags = re.IGNORECASE)
 
