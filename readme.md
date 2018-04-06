@@ -23,7 +23,7 @@ sim-sim
 
 В нижней части окна откроется черное окно консоли. Вставьте в нее следующую команду и нажмите ввод:
 
-    git clone https://github.com/stopcenz/webproxy
+    git clone https://github.com/stopcenz/sim-sim
 
 Начнется копирование готового проекта в рабочую область. При успешном завершении в конце будет напечатана строка:
 >Unpacking objects: 100% (/), done.
