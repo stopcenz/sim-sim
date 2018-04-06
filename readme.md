@@ -33,9 +33,7 @@ sim-sim
 
 Будет выведен список доступных площадок. 
 
->Please choose the region where you want your App Engine application
-
->located:
+>Please choose the region where you want your App Engine application located:
 
 > [1] europe-west2  (supports standard and flexible)
 
