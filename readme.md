@@ -17,7 +17,7 @@ sim-sim
 
 ![Notifications](http://images.vfl.ru/ii/1523011443/c77c1b79/21273759.png)
 
-Рядом вы найдете кнопку Activate Google Cloud Shell. Нажмите ее.
+Рядом вы найдете кнопку *Activate Google Cloud Shell*. Нажмите ее.
 
 ![Activate Goole Cloud Shell](http://images.vfl.ru/ii/1523011521/427768bf/21273769.png)
 
