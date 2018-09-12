@@ -187,7 +187,8 @@ class MainHandler(webapp2.RequestHandler):
     if scheme is None:
       self.redirect(str('https://' + self.root_host))
       return
-    (scheme, host, path_qs) = patch_host_back(scheme, host, self.request.path_qs)
+    
+    (scheme, host, path_qs) = patch_host_back(scheme, host, self.clean_path_qs)
     url = scheme + '://' + host
     if port:
       if scheme == 'https':
@@ -440,8 +441,18 @@ class MainHandler(webapp2.RequestHandler):
       return False
     memcache.set(token, value, 60 * 60, namespace = 'tokens')
     return True
-
-
+  
+  
+  @property
+  def clean_path_qs(self):
+    # preventing modify path_qs in webapp2.RequestHandler
+    qs = self.request.environ.get('QUERY_STRING')
+    if qs:
+      return self.request.environ['PATH_INFO'] + '?' + qs
+    
+    return self.request.environ['PATH_INFO']
+      
+  
 app = webapp2.WSGIApplication([
   ('/.*', MainHandler)
 ], debug=False)
