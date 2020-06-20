@@ -83,7 +83,6 @@ ECXCLUDED_HOSTS = [
   "ytimg.com",
   "vimeo.com",
   "vimeocdn.com",
-  "googleapis.com",
   "bootstrapcdn.com",
   "onion",
   "lib",
